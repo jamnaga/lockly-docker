@@ -9,57 +9,98 @@ module.exports = Composer.mount(
     if (ctx.updateType != 'message' || !ctx.message.text)
       return;
 
-    const groupChat = await db.findGroupByIdOrCreate(ctx);
+    const group = await db.findGroupByIdOrCreate(ctx);
 
-    let markov = new Markov(groupChat.messages, { stateSize: 2 });
-    
-    // Load pre-trained corpus to make the bot faster, the corpus will be trained for each group every x time
-    let preTrainedCorpus = await db.getCorpus(ctx.chat.id);
-
-    // If we don't have already a pre-trained corpus, the group chat is new, so we will train it since it shouldn't take so long
-    if(!preTrainedCorpus) {
-
-      await markov.buildCorpusAsync();
-
-    } else {
-
-      // If we have the pre-trained corpus, just set the value
-      markov.corpus = preTrainedCorpus;
-
-    }
-
-    // If can't train corpus due to a lack of messages and get back an empty object {}, just save the message and return
-    if(Object.keys(markov.corpus).length === 0) {
+    if(!group.enabled) {
 
       await db.addMessage(ctx.chat.id, ctx.message.text);
 
       return;
-    
+
     }
+    
+    let { messages } = await db.getMessages(ctx.chat.id);
+    
+    // Load pre-trained corpus to make the bot faster, the corpus will be trained for each group every x time
+    let groupMarkovData = await db.getMarkovData(ctx.chat.id);
+
+    let markov;
+
+    // If we don't have already a pre-trained corpus, the group chat is new, so we will train it since it shouldn't take so long
+    if(!groupMarkovData) {
+
+
+      markov = new Markov({
+
+        stateSize: 1
+
+      });
+
+      await markov.addDataAsync(messages);
+
+    } else {
+
+      markov = new Markov({
+
+        stateSize: 1
+
+      });
+
+      // If we have the pre-trained data, import the stored one
+
+      await markov.import(groupMarkovData.markovData);
+
+    }
+
+    // If can't train corpus due to a lack of messages and get back an empty object {}, just save the message and return
+    // if(!markov.corpus) {
+
+    //   if(group.debugMode)
+    //     ctx.replyWithHTML(`<b>MESSAGGIO DEBUG</b>\n<b>Errore:</b> Non sono riuscito a generare un messaggio per via della scarsa disponibilità di messaggi nel mio database.`)
+
+    //   await db.addMessage(ctx.chat.id, ctx.message.text);
+
+    //   return;
+    
+    // }
 
     const markovOptions = {
 
-      maxTries: 10000,
+      maxTries: 1000,
       prng: Math.random,
       filter: (result) => {
 
-        return result.string.split(' ').length >= 5
+        return result.string.split(' ').length >= 5 &&
+          result.string.endsWith('.')
 
       }
 
     }
 
-    const markovReply = await markov.generateAsync(markovOptions);
+    let replyMessage;
 
-    if (!groupChat.debugMode) {
+    try {
+      
+      const markovReply = await markov.generateAsync(markovOptions);
 
-      ctx.reply(markovReply.string);
+      if (!group.debugMode) {
+  
+        ctx.reply(markovReply.string);
+  
+      } else {
+  
+        replyMessage = `<b>MESSAGGIO DEBUG</b>\n<b>Risposta:</b> ${markovReply.string}\n<b>Prove (tries):</b> ${markovReply.tries}\n<b>Score:</b> ${markovReply.score}\n<b>Refs:</b> ${JSON.stringify(markovReply.refs)}`;
+  
+      }
+      
+    } catch (error) {
 
-    } else {
-
-      ctx.replyWithHTML(`<b>MESSAGGIO DEBUG</b>\n<b>Risposta:</b> ${markovReply.string}\n<b>Prove (tries):</b> ${markovReply.tries}\n<b>Score:</b> ${markovReply.score}\n<b>Refs:</b> ${JSON.stringify(markovReply.refs)}`);
-
+      replyMessage = `<b>MESSAGGIO DEBUG</b>\n<b>Errore:</b> ${error.message}`;
+      
     }
+
+    if(group.debugMode)
+      ctx.replyWithHTML(replyMessage);
 
     await db.addMessage(ctx.chat.id, ctx.message.text);
 

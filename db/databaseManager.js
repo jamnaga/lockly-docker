@@ -1,82 +1,144 @@
-const group = require('./models/group');
+const Group = require('./models/group');
+const GroupMessages = require('./models/groupMessages');
+const GroupMarkovData = require('./models/groupMarkovData');
+const sequelize = require('sequelize');
+const groupMessages = require('./models/groupMessages');
+const { bot } = require('../config.json');
 
 module.exports = {
 
   findGroupByIdOrCreate: async (ctx) => {
 
-    let groupChat = await group.findOne({ groupID: ctx.chat.id });
+    let group = await Group.findOne({ where: { gid: ctx.chat.id } });
 
-    if(!groupChat) {
+    if(!group) {
 
-      let newGroupChat = await group.create({
+      let newGroup = await Group.create({
 
-        groupID: ctx.chat.id,
+        gid: ctx.chat.id,
+        enabled: true,
+        debugMode: false
+        
+      });
+
+      let newMessage = await GroupMessages.create({
+
+        groupGid: ctx.chat.id,
         messages: [ctx.message.text]
 
       });
 
-      return newGroupChat;
+      return newGroup;
     
     }
 
-    return groupChat;
+    return group;
 
   },
 
-  findGroupByID: async (groupID) => {
+  findGroupByID: async (gid) => {
 
-    let groupChat = await group.findOne({ groupID });
+    let groupChat = await Group.findOne({ where: { gid } });
 
     return groupChat;
 
   },
   
-  getCorpus: async (groupID) => {
+  getMarkovData: async (gid) => {
 
-    let groupChat = await group.findOne({ groupID });
+    let groupMarkovData = await GroupMarkovData.findOne({ where: { groupGid: gid } });
 
-    if(!groupChat.corpus)
+    if(!groupMarkovData)
       return false;
 
-    return JSON.parse(groupChat.corpus);
+    return groupMarkovData;
 
   },
 
-  updateCorpus: async (groupID, corpus) => {
+  updateOrCreateMarkovData: async (gid, markovData) => {
 
-    let groupChat = await group.findOne({ groupID });
+    let groupMarkovData = await GroupMarkovData.findOne({ where: { groupGid: gid } });
 
-    groupChat.corpus = JSON.stringify(corpus);
+    if(!groupMarkovData) {
 
-    groupChat.save();
+      let newMarkovData = await GroupMarkovData.create({
+
+        groupGid: gid,
+        markovData: markovData
+
+      });
+
+      return;
+
+    }
+
+    groupMarkovData.markovData = markovData;
+
+    groupMarkovData.save();
 
     return true;
 
   },
 
-  getMessages: async (groupID) => {
+  getMessages: async (gid) => {
 
-    let groupChat = await group.findOne({ groupID });
+    let groupChat = await GroupMessages.findOne({ where: { groupGid: gid } });
 
-    return groupChat.messages;
+    if(!groupChat)
+      return false;
+
+    return groupChat;
   
   },
 
-  addMessage: async (groupID, message) => {
+  addMessage: async (gid, message) => {
 
-    let groupChat = await group.findOne({ groupID });
+    let groupChat = await GroupMessages.findOne({ where: { groupGid: gid } });
 
-    groupChat.messages.push(message);
+    // Creating a new array instead of pushing since sequelize doesn't detect push changes and refuses to save the array.
+    // Slicing in order to limit the messages size 
+    // I already tried with something like 300k messages and a black hole appeared and ate my fucking RAM
+    let newArr = [
+      message, 
+      ...groupChat.messages
+        .slice(groupChat.messages.length - (bot.messagesArrayMaxSize - 1), groupChat.messages.length)
+    ];
 
-    groupChat.save();
+    groupChat.messages = newArr;
+
+    await groupChat.save();
 
     return true;
+
+  },
+
+  clearMessages: async (gid) => {
+
+    let groupChat = await GroupMessages.findOne({ where: { groupGid: gid } });
+
+    let groupMarkovData = await GroupMarkovData.findOne({ where: { groupGid: gid } });
+
+    if(groupMarkovData) {
+      
+      groupMarkovData.markovData = {};
+
+      await groupMarkovData.save();
+
+    }
+
+    if(groupChat) {
+
+      groupChat.messages = [];
+
+      await groupChat.save();
+    
+    }
 
   },
 
   getGroups: async () => {
 
-    let groupChats = await group.find({});
+    let groupChats = await Group.findAll();
 
     return groupChats;
 

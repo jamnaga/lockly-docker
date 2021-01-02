@@ -1,0 +1,19 @@
+{
+
+  "database": {
+
+    "host": "localhost",
+    "port": "27017",
+    "dbName": "Lockly",
+    "username": "lockly",
+    "password": "changemeplease"
+
+  },
+  
+  "bot": {
+
+    "messagesArrayMaxSize": 200000
+
+  }
+
+}

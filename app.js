@@ -1,31 +1,38 @@
 const telegraf = require('telegraf');
-const mongoose = require('mongoose');
 const dotenv = require('dotenv').config();
 const Composer = require('telegraf/composer');
 const scheduler = require('node-schedule');
-const markovTrainer = require('./utils/markovTrainer');
+const TrainerService = require('./services/TrainerService');
 const telegramParser = require('./utils/telegramParser');
+const db = require('./db/db');
 
-const trainJob = scheduler.scheduleJob('trainJob', '* */1 * * *', markovTrainer);
+let trainerService = new TrainerService();
+
+const trainJob = scheduler.scheduleJob('trainJob', '*/30 * * * *', trainerService.startThreadedTraining);
 
 const bot = new telegraf.Telegraf(process.env.BOT_TOKEN);
-
-(async () => {
-  
-  await mongoose.connect('mongodb://localhost:27017/Lockly', { useNewUrlParser: true, useUnifiedTopology: true, useCreateIndex: true });
-
-})();
 
 // Middleware
 
 const groupCommands = new Composer();
 
 groupCommands.command('/debug', require('./events/commands/debug'));
+groupCommands.command('/enable', require('./events/commands/enable'));
+groupCommands.command('/disable', require('./events/commands/disable'));
+groupCommands.command('/stats', require('./events/commands/stats'));
+groupCommands.command('/clearMessages', require('./events/commands/clearMessages'));
+groupCommands.on('callback_query', require('./events/callbacks/callbackQueryHandler'));
+
 groupCommands.on('message', require('./events/messages/markovReply'));
 
 bot.use(groupCommands);
 
 bot.use(async (ctx, next) => {
+
+
+  // IDK why sometimes is undefined even message...
+  if(ctx.message == undefined)
+    return;
 
   //If it's not a text message
   if(ctx.message.text == undefined) 
